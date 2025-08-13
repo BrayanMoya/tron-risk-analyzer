@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <title>TRON Wallet Risk Analyzer</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- Tailwind via CDN (solo para estilo rápido) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    .risk-bar { transition: width .4s ease; }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-800">
+  <header class="bg-white shadow">
+    <div class="max-w-4xl mx-auto px-4 py-5 flex items-center justify-between">
+      <h1 class="text-xl font-semibold">TRON Wallet Risk Analyzer</h1>
+      <a href="/docs" class="text-sm text-indigo-600 hover:underline">API Docs</a>
+    </div>
+  </header>
+
+  <main class="max-w-4xl mx-auto px-4 py-6">
+    <!-- Card: Entrada -->
+    <div class="bg-white rounded-xl shadow p-4 md:p-6">
+      <label for="addr" class="block text-sm font-medium mb-2">Dirección TRON (T...)</label>
+      <div class="flex gap-2">
+        <input id="addr" type="text" placeholder="Txxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+               class="flex-1 border border-slate-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+        <button id="btnAnalyze"
+                class="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50">
+          Analizar
+        </button>
+      </div>
+      <p id="hint" class="text-xs text-slate-500 mt-2">Ejemplo: TDLcipJPJMT6iCFava8B9A1gGiKJvBRWzn</p>
+    </div>
+
+    <!-- Resultado -->
+    <section id="result" class="hidden mt-6 space-y-6">
+      <!-- Encabezado riesgo -->
+      <div class="bg-white rounded-xl shadow p-4 md:p-6">
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="text-lg font-semibold">Resultado</h2>
+          <a id="btnPdf" href="#" target="_blank"
+             class="inline-flex items-center gap-2 bg-emerald-600 text-white px-3 py-2 rounded-lg hover:bg-emerald-700">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor"><path d="M6 2a1 1 0 0 0-1 1v16h14V3a1 1 0 0 0-1-1H6zm-3 18a1 1 0 0 0 1 1h16a1 1 0 1 0 0-2H4a1 1 0 0 0-1 1z"/></svg>
+            Descargar PDF
+          </a>
+        </div>
+
+        <div class="space-y-2">
+          <div class="flex items-center gap-3">
+            <div class="text-sm text-slate-600">Risk Score</div>
+            <div id="scoreVal" class="text-lg font-semibold">0</div>
+            <span id="levelBadge" class="text-xs font-semibold px-2 py-1 rounded bg-slate-200">-</span>
+          </div>
+
+          <div class="w-full bg-slate-200 rounded-full h-3 overflow-hidden">
+            <div id="riskBar" class="risk-bar h-3 rounded-full" style="width:0%"></div>
+          </div>
+
+          <div class="text-sm text-slate-600"><span class="font-medium">Resumen:</span> <span id="summary">—</span></div>
+        </div>
+      </div>
+
+      <!-- Overview -->
+      <div class="bg-white rounded-xl shadow p-4 md:p-6">
+        <h3 class="text-base font-semibold mb-3">Información básica</h3>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-1 text-sm">
+          <div><span class="font-medium">Creada:</span> <span id="createdAt">—</span></div>
+          <div><span class="font-medium">Última operación:</span> <span id="lastOp">—</span></div>
+          <div><span class="font-medium">Primer transfer:</span> <span id="firstTx">—</span></div>
+          <div><span class="font-medium">Último transfer:</span> <span id="lastTx">—</span></div>
+          <div><span class="font-medium">Inflow USDT:</span> <span id="inflow">—</span></div>
+          <div><span class="font-medium">Outflow USDT:</span> <span id="outflow">—</span></div>
+        </div>
+      </div>
+
+      <!-- Exposure -->
+      <div class="bg-white rounded-xl shadow p-4 md:p-6">
+        <h3 class="text-base font-semibold mb-3">Exposure</h3>
+        <div id="exposure" class="flex flex-wrap gap-2 text-sm"></div>
+      </div>
+
+      <!-- Razones -->
+      <div class="bg-white rounded-xl shadow p-4 md:p-6">
+        <h3 class="text-base font-semibold mb-3">Razones</h3>
+        <ul id="reasons" class="space-y-2 text-sm"></ul>
+      </div>
+    </section>
+
+    <div id="alert" class="hidden mt-6 bg-red-50 text-red-800 border border-red-200 rounded-lg p-4 text-sm"></div>
+  </main>
+
+  <script>
+    const addrInput = document.getElementById('addr');
+    const btn = document.getElementById('btnAnalyze');
+    const result = document.getElementById('result');
+    const riskBar = document.getElementById('riskBar');
+    const scoreVal = document.getElementById('scoreVal');
+    const levelBadge = document.getElementById('levelBadge');
+    const summary = document.getElementById('summary');
+    const createdAt = document.getElementById('createdAt');
+    const lastOp = document.getElementById('lastOp');
+    const firstTx = document.getElementById('firstTx');
+    const lastTx = document.getElementById('lastTx');
+    const inflow = document.getElementById('inflow');
+    const outflow = document.getElementById('outflow');
+    const exposure = document.getElementById('exposure');
+    const reasons = document.getElementById('reasons');
+    const alertBox = document.getElementById('alert');
+    const btnPdf = document.getElementById('btnPdf');
+
+    function setLevelColor(score) {
+      if (score >= 70) return ['High', 'bg-red-500'];
+      if (score >= 30) return ['Medium', 'bg-amber-500'];
+      return ['Low', 'bg-emerald-500'];
+    }
+
+    function showError(msg) {
+      alertBox.textContent = msg || 'Ocurrió un error';
+      alertBox.classList.remove('hidden');
+      result.classList.add('hidden');
+    }
+
+    function hideError() {
+      alertBox.classList.add('hidden');
+    }
+
+    btn.addEventListener('click', async () => {
+      const a = addrInput.value.trim();
+      if (!a) return showError('Ingresa una dirección TRON que comience con T');
+
+      btn.disabled = true; hideError();
+
+      try {
+        const r = await fetch(`/risk/${encodeURIComponent(a)}`);
+        if (!r.ok) {
+          const tx = await r.text();
+          throw new Error(tx || 'Solicitud fallida');
+        }
+        const data = await r.json();
+
+        // Barra y nivel
+        const score = Math.max(0, Math.min(100, parseInt(data.risk_score || 0)));
+        const [level, cls] = setLevelColor(score);
+        scoreVal.textContent = score;
+        levelBadge.textContent = level;
+        levelBadge.className = `text-xs font-semibold px-2 py-1 rounded text-white ${cls}`;
+        riskBar.style.width = score + '%';
+        riskBar.className = `risk-bar h-3 rounded-full ${cls}`;
+        summary.textContent = data.summary || '—';
+
+        // Básicos
+        const b = data.basic_info || {};
+        createdAt.textContent = b.created_at || '—';
+        lastOp.textContent = b.last_operation_at || '—';
+        firstTx.textContent = b.first_transfer || '—';
+        lastTx.textContent = b.last_transfer || '—';
+        inflow.textContent = b.inflow_usdt || '—';
+        outflow.textContent = b.outflow_usdt || '—';
+
+        // Exposure
+        exposure.innerHTML = '';
+        (data.exposure || []).forEach(ex => {
+          const chip = document.createElement('span');
+          chip.className = 'px-2 py-1 bg-slate-100 rounded-lg border border-slate-200';
+          chip.textContent = `${ex.category}: ${ex.share}%`;
+          exposure.appendChild(chip);
+        });
+
+        // Razones
+        reasons.innerHTML = '';
+        (data.reasons || []).forEach(rz => {
+          const li = document.createElement('li');
+          li.className = 'border border-slate-200 rounded-lg p-3';
+          li.innerHTML = `<div class="font-medium">[${rz.code}] +${rz.weight}</div>
+                          <div class="text-slate-600">${rz.detail || ''}</div>`;
+          reasons.appendChild(li);
+        });
+
+        // PDF
+        btnPdf.href = `/report/${encodeURIComponent(a)}`;
+
+        result.classList.remove('hidden');
+      } catch (err) {
+        showError(err.message);
+      } finally {
+        btn.disabled = false;
+      }
+    });
+
+    // Enter para analizar
+    addrInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') btn.click();
+    });
+  </script>
+</body>
+</html>

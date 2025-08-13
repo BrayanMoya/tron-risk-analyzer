@@ -7,6 +7,10 @@ from tempfile import mkstemp
 from .risk_engine.core import score_wallet
 from .pdf_report.build import build_pdf
 from .storage.db import maybe_init_db
+from .web_ui import router as web_ui_router
+from sqlalchemy import func
+from .storage.db import SessionLocal
+from .storage.models import Analysis
 
 load_dotenv()
 
@@ -20,6 +24,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(web_ui_router)
 
 @app.on_event("startup")
 async def _startup():
@@ -43,3 +49,17 @@ async def report(address: str):
     path = mkstemp(suffix=".pdf")[1]
     build_pdf(address, result, path)
     return FileResponse(path, media_type="application/pdf", filename=f"tron-risk-{address}.pdf")
+
+@app.get("/debug/audit-status")
+def audit_status():
+    db = SessionLocal()
+    try:
+        total = db.query(func.count(Analysis.id)).scalar()
+        return {
+            "AUDIT_MODE_env": os.getenv("AUDIT_MODE"),
+            "AUDIT_MODE_active": AUDIT_MODE,
+            "CACHE_MINUTES": os.getenv("CACHE_MINUTES", "15"),
+            "rows_in_db": total
+        }
+    finally:
+        db.close()

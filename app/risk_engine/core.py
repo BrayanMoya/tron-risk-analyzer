@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import List, Dict, Any, Tuple, Set
 from decimal import Decimal, InvalidOperation
 import os
@@ -6,17 +6,17 @@ import os
 from ..sources.tronscan import check_account_security, check_stablecoin_blacklist, trc20_transfers
 from ..sources.trongrid import account_overview, account_trc20_transfers, USDT_CONTRACT
 from .weights import W
+from ..storage.db import SessionLocal
+from ..storage.models import Analysis
 
-AUDIT_MODE = os.getenv("AUDIT_MODE", "false").lower() == "true"
-if AUDIT_MODE:
-    from ..storage.db import SessionLocal
-    from ..storage.models import Analysis
 
+CACHE_MINUTES = int(os.getenv("CACHE_MINUTES", "15"))
 DUST_MICRO_USDT = Decimal(os.getenv("DUST_MICRO_USDT", "0.1"))
 DUST_SMALL_USDT = Decimal(os.getenv("DUST_SMALL_USDT", "1.0"))
 DUST_MIN_EVENTS = int(os.getenv("DUST_MIN_EVENTS", "3"))
 USDT_CONTRACT_UP = USDT_CONTRACT.upper()
 USDT_MAX_EVENT = Decimal("1e12")  # umbral sanitario por evento
+
 
 def fmt_amount(d: Decimal, places=2) -> str:
     # 2 decimales + separador de miles, sin notación científica
@@ -153,8 +153,50 @@ def _exposure_breakdown(risky_in_cnt, risky_out_cnt, dust_in_cnt, dust_out_cnt, 
     if cex_hits: add("Exchange", cex_hits)
     return expo
 
+# ----------- CACHE: lee último análisis si es reciente -----------
+def _get_cached(address: str):
+    if CACHE_MINUTES <= 0:
+        return None
+    db = SessionLocal()
+    try:
+        row = db.query(Analysis).filter(Analysis.address == address).order_by(Analysis.created_at.desc()).first()
+        if not row:
+            return None
+        age = datetime.now(timezone.utc) - (row.created_at.replace(tzinfo=timezone.utc) if row.created_at.tzinfo is None else row.created_at)
+        if age <= timedelta(minutes=CACHE_MINUTES) and row.snapshot:
+            return row.snapshot  # dict completo
+        return None
+    finally:
+        db.close()
 
+def _store_result(address: str, result: dict):
+    db = SessionLocal()
+    try:
+        row = Analysis(
+            address=address,
+            risk_score=int(result.get("risk_score", 0)),
+            risk_level=result.get("risk_level", ""),
+            reasons=result.get("reasons", []),
+            summary=result.get("summary", ""),
+            snapshot=result  # guarda el resultado para cache
+        )
+        db.add(row)
+        db.commit()
+    except Exception as e:
+        # Log explícito para depurar si algo falla
+        print(f"[AUDIT SAVE ERROR] {e}")
+        raise
+    finally:
+        db.close()
+
+# ------------------- FUNCIÓN PRINCIPAL -------------------
 async def score_wallet(address_b58: str, audit: bool = False) -> dict:
+    # 0) cache
+    if audit:
+        cached = _get_cached(address_b58)
+        if cached:
+            return cached
+
     reasons: List[Dict[str, Any]] = []
     score = 0
 
@@ -238,18 +280,7 @@ async def score_wallet(address_b58: str, audit: bool = False) -> dict:
         "exposure": _exposure_breakdown(len(risky_in), len(risky_out), dust_in, dust_out),
     }
 
-    if audit and AUDIT_MODE:
-        try:
-            db = SessionLocal()
-            row = Analysis(
-                address=address_b58,
-                risk_score=score,
-                risk_level=level,
-                reasons=result["reasons"],
-                summary=result["summary"],
-                snapshot={"basic_info": result["basic_info"]},
-            )
-            db.add(row); db.commit()
-        except Exception:
-            pass
+    # 3) guardar en DB y devolver
+    if audit:
+        _store_result(address_b58, result)
     return result
