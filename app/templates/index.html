@@ -7,10 +7,10 @@
     <!-- Tailwind via CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- ZXing (decodificación QR en navegador) -->
-    <script src="https://unpkg.com/@zxing/library@latest/umd/index.min.js"></script>
+    <script src="https://unpkg.com/@zxing/library@0.20.0/umd/index.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
     <style>
         .risk-bar { transition: width .4s ease; }
-        video { transform: scaleX(-1); } /* espejo para cámara frontal */
     </style>
 </head>
 <body class="bg-slate-50 text-slate-800">
@@ -27,11 +27,11 @@
     <!-- Entrada manual -->
     <div class="bg-white rounded-xl shadow p-4 md:p-6">
         <label for="addr" class="block text-sm font-medium mb-2">Dirección TRON (T...)</label>
-        <div class="flex gap-2">
+        <div class="flex flex-col sm:flex-row gap-2 items-stretch">
             <input id="addr" type="text" placeholder="Txxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-                   class="flex-1 border border-slate-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                   class="w-full sm:flex-1 min-w-0 border border-slate-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500">
             <button id="btnAnalyze"
-                    class="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50">
+                    class="w-full sm:w-auto shrink-0 bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50">
                 Analizar
             </button>
         </div>
@@ -44,15 +44,15 @@
         <div class="bg-white rounded-xl shadow p-4 md:p-6">
             <div class="flex items-center justify-between mb-3">
                 <h2 class="text-base font-semibold">Escanear QR (Cámara)</h2>
-                <div class="text-xs text-slate-500">Funciona en <strong>localhost</strong> sin HTTPS.</div>
+                <div class="text-xs text-slate-500">Requiere <strong>HTTPS</strong> (o localhost).</div>
             </div>
             <div class="space-y-3">
                 <div class="flex items-center gap-2">
-                    <select id="cameraSelect" class="flex-1 border border-slate-300 rounded-lg px-3 py-2"></select>
                     <button id="btnStartCam" class="bg-slate-700 text-white px-3 py-2 rounded-lg hover:bg-slate-800">
                         Iniciar
                     </button>
-                    <button id="btnStopCam" class="bg-slate-200 px-3 py-2 rounded-lg hover:bg-slate-300">Detener
+                    <button id="btnStopCam" class="bg-slate-200 px-3 py-2 rounded-lg hover:bg-slate-300">
+                        Detener
                     </button>
                 </div>
                 <div class="rounded-lg overflow-hidden bg-black">
@@ -262,7 +262,6 @@
     }
 
     // ---------- QR: Cámara ----------
-  const cameraSelect = document.getElementById('cameraSelect'); // seguirá visible pero no es obligatorio
   const btnStartCam = document.getElementById('btnStartCam');
   const btnStopCam  = document.getElementById('btnStopCam');
   const video = document.getElementById('video');
@@ -271,94 +270,70 @@
 
   const codeReader = new ZXing.BrowserQRCodeReader();
   let running = false;
-  let currentFacing = 'environment'; // environment = trasera, user = frontal
   let currentStream = null;
+  let currentFacing = 'environment'; // 'environment' = trasera, 'user' = frontal
 
-  function insecureContextMsg() {
-    return 'La cámara requiere HTTPS o localhost. Abre la URL con https:// (ngrok te da un enlace HTTPS).';
-  }
   function isSecureEnough() {
     const h = location.hostname;
     return location.protocol === 'https:' || h === 'localhost' || h === '127.0.0.1';
-  }
-  function setDetectedAddress(addr) {
-    qrCamResult.textContent = addr || '—';
-    btnUseCamResult.disabled = !addr;
   }
   function mirrorVideoForFacing() {
     // espejo solo para la frontal
     video.style.transform = (currentFacing === 'user') ? 'scaleX(-1)' : 'none';
   }
+  function setDetectedAddressFromCam(addr) {
+    qrCamResult.textContent = addr || '—';
+    btnUseCamResult.disabled = !addr;
+  }
 
-  async function startWithConstraints(facing) {
-    currentFacing = facing || 'environment';
+  async function startWithFacing(facing) {
+    currentFacing = facing;
     mirrorVideoForFacing();
-    // constraints para móviles (no usamos deviceId)
+
     const constraints = {
       audio: false,
       video: {
-        facingMode: { ideal: currentFacing },
-        // sugerencias de tamaño (opcionales)
+        facingMode: { ideal: currentFacing }, // intenta trasera primero
         width:  { ideal: 1280 },
         height: { ideal: 720 }
       }
     };
 
-    // 1) Asegura contexto seguro
-    if (!isSecureEnough()) {
-      showError(insecureContextMsg());
-      throw new Error('insecure-context');
-    }
+    // pedir permiso + stream de vista previa
+    currentStream = await navigator.mediaDevices.getUserMedia(constraints);
+    video.srcObject = currentStream;
+    await video.play().catch(()=>{});
 
-    // 2) Pide permiso iniciando un stream básico (algunos navegadores lo requieren antes de decodificar)
-    try {
-      currentStream = await navigator.mediaDevices.getUserMedia(constraints);
-      // conecta el stream al <video> para feedback inmediato
-      video.srcObject = currentStream;
-      await video.play().catch(()=>{});
-    } catch (e) {
-      if (e && e.name === 'NotAllowedError') {
-        showError('Permiso de cámara denegado. Concede acceso para escanear QR.');
-      } else if (e && e.name === 'NotFoundError') {
-        showError('No se encontró ninguna cámara en este dispositivo.');
-      } else {
-        showError('No se pudo iniciar la cámara. Revisa permisos/navegador.');
-      }
-      throw e;
-    }
-
-    // 3) Inicia decodificación con ZXing usando constraints (sin deviceId)
+    // decodificar con ZXing usando las mismas constraints
     await codeReader.decodeFromConstraints(constraints, video, (result, err) => {
       if (result) {
         const addr = extractTronAddress(result.getText());
-        setDetectedAddress(addr);
+        setDetectedAddressFromCam(addr);
       }
-      // los errores “normales” del escaneo se ignoran para seguir intentando
+      // errores de frame se ignoran para seguir escaneando
     });
   }
 
   async function startCamera() {
     if (running) return;
+    if (!isSecureEnough()) {
+      showError('La cámara requiere HTTPS o localhost.');
+      return;
+    }
     hideError();
-    qrCamResult.textContent = '—';
-    btnUseCamResult.disabled = true;
+    setDetectedAddressFromCam(null);
     running = true;
 
     try {
-      // Intento con cámara trasera
-      await startWithConstraints('environment');
+      // intenta trasera
+      await startWithFacing('environment');
     } catch (e) {
-      // Fallback: intenta frontal si la trasera no está disponible
-      if (e && e.name === 'NotFoundError') {
-        try {
-          await startWithConstraints('user');
-        } catch (e2) {
-          running = false;
-          return; // showError ya mostrado
-        }
-      } else {
+      // fallback frontal si la trasera no existe/permitida
+      try {
+        await startWithFacing('user');
+      } catch (e2) {
         running = false;
-        return;
+        showError('No se pudo iniciar la cámara. Revisa permisos/navegador.');
       }
     }
   }
@@ -372,6 +347,7 @@
     running = false;
   }
 
+  // Botones
   btnStartCam.addEventListener('click', startCamera);
   btnStopCam.addEventListener('click', stopCamera);
   btnUseCamResult.addEventListener('click', () => {
@@ -379,23 +355,104 @@
     if (addr) { addrInput.value = addr; doAnalyze(); }
   });
 
-  // Rellenar select si el navegador lo soporta, pero NO lo necesitamos para móviles
-  (async () => {
-    if (!isSecureEnough()) return;
+  // Ahorro de batería: para el stream si la pestaña se oculta
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) stopCamera();
+  });
+
+  // ====== QR: Imagen (robusto) ======
+  const fileInput = document.getElementById('fileInput');
+  const previewImg = document.getElementById('previewImg');
+  const qrFileResult = document.getElementById('qrFileResult');
+  const btnUseFileResult = document.getElementById('btnUseFileResult');
+
+  function setDetectedAddressFromFile(addr) {
+    qrFileResult.textContent = addr || '—';
+    btnUseFileResult.disabled = !addr;
+  }
+
+  function readFileAsDataURL(file) {
+    return new Promise((resolve, reject) => {
+      const fr = new FileReader();
+      fr.onload = () => resolve(fr.result);
+      fr.onerror = reject;
+      fr.readAsDataURL(file);
+    });
+  }
+
+  async function drawToCanvas(dataUrl, maxSide = 1024) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => {
+        // reescala para mejorar reconocimiento
+        const w = img.naturalWidth, h = img.naturalHeight;
+        const scale = Math.min(1, maxSide / Math.max(w, h));
+        const cw = Math.max(1, Math.round(w * scale));
+        const ch = Math.max(1, Math.round(h * scale));
+        const canvas = document.createElement('canvas');
+        canvas.width = cw; canvas.height = ch;
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        ctx.drawImage(img, 0, 0, cw, ch);
+        resolve({ canvas, ctx, cw, ch });
+      };
+      img.onerror = () => reject(new Error('No se pudo cargar la imagen'));
+      img.src = dataUrl;
+    });
+  }
+
+  function tryJsQR(ctx, w, h) {
+    const imageData = ctx.getImageData(0, 0, w, h);
+    // intenta normal e invertido (blanco/negro)
+    const res = jsQR(imageData.data, w, h, { inversionAttempts: 'attemptBoth' });
+    return res ? (res.data || '') : '';
+  }
+
+  fileInput.addEventListener('change', async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setDetectedAddressFromFile(null);
+    previewImg.removeAttribute('src');
+
     try {
-      const devices = await navigator.mediaDevices.enumerateDevices();
-      const vids = devices.filter(d => d.kind === 'videoinput');
-      cameraSelect.innerHTML = '';
-      vids.forEach((d, i) => {
-        const opt = document.createElement('option');
-        opt.value = d.deviceId || '';
-        opt.textContent = d.label || `Cámara ${i+1}`;
-        cameraSelect.appendChild(opt);
-      });
-      // Nota: en muchos móviles Samsung este select quedará vacío o sin labels; no pasa nada,
-      // el escaneo por constraints (botón Iniciar) funciona igual.
-    } catch {}
-  })();
+      // 1) Cargar a data URL (no revocamos)
+      const dataUrl = await readFileAsDataURL(file);
+      previewImg.src = dataUrl;
+
+      // 2) Primer intento (reescala a 1024 px lado mayor)
+      let { canvas, ctx, cw, ch } = await drawToCanvas(dataUrl, 1024);
+      let text = tryJsQR(ctx, cw, ch);
+
+      // 3) Fallbacks: distintos tamaños ayudan mucho
+      if (!text) {
+        // más grande
+        ({ canvas, ctx, cw, ch } = await drawToCanvas(dataUrl, 1600));
+        text = tryJsQR(ctx, cw, ch);
+      }
+      if (!text) {
+        // más pequeño (reduce ruido)
+        ({ canvas, ctx, cw, ch } = await drawToCanvas(dataUrl, 720));
+        text = tryJsQR(ctx, cw, ch);
+      }
+
+      if (text) {
+        const addr = extractTronAddress(text);
+        setDetectedAddressFromFile(addr || null);
+      } else {
+        qrFileResult.textContent = 'No se detectó un QR válido en la imagen.';
+        btnUseFileResult.disabled = true;
+      }
+    } catch (err) {
+      qrFileResult.textContent = 'Error al procesar la imagen.';
+      btnUseFileResult.disabled = true;
+      // console.error(err);
+    }
+  });
+
+  btnUseFileResult.addEventListener('click', () => {
+    const addr = extractTronAddress(qrFileResult.textContent);
+    if (addr) { addrInput.value = addr; doAnalyze(); }
+  });
 </script>
 </body>
 </html>
