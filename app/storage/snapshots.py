@@ -31,7 +31,6 @@ def _is_fresh(path: Path) -> bool:
 
 def load_snapshot(address: str) -> Optional[dict]:
     path = _fname(address)
-    print(f"snapshot path: {path}")
     if not path.exists():
         return None
     if not _is_fresh(path):
