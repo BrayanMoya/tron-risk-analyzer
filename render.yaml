@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: tron-risk
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: bash -lc "gunicorn -k uvicorn.workers.UvicornWorker -w 2 -b 0.0.0.0:$PORT app.main:app"
+    envVars:
+      - key: SNAPSHOT_TTL_MINUTES
+        value: "120"
+      - key: SNAPSHOT_DIR
+        value: "/tmp/tron_risk_snapshots"
+      - key: TRONSCAN_API_KEY
+        sync: false
+      - key: HOST
+        value: "0.0.0.0"
+      - key: PORT
+        value: "8000"
