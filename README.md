@@ -61,7 +61,6 @@ mobile/ (opcional, Flutter)
 
      ```
      TRONSCAN_API_KEY=TU_KEY_OPCIONAL
-     AUDIT_MODE=true
      HOST=0.0.0.0
      PORT=8000
      DUST_MICRO_USDT=0.1
@@ -69,7 +68,6 @@ mobile/ (opcional, Flutter)
      DUST_MIN_EVENTS=3
      ```
 
-     > *`AUDIT_MODE=true`* activa SQLite para histórico/caché (archivo `audits.db`).
    * Ejecuta:
 
      ```bat
@@ -211,7 +209,7 @@ Tabla con **códigos** y **pesos** que componen el score:
 ## 7) Buenas prácticas y límites
 
 * El score es **heurístico**, no un dictamen legal. Úsalo como **señal** para priorizar revisiones.
-* **Privacidad**: el sistema consulta APIs públicas. Si activas `AUDIT_MODE`, guardará un rastro mínimo (score, razones y básicos) en `audits.db`.
+* **Privacidad**: el sistema consulta APIs públicas.
 * **Cobertura**: el análisis se centra en **USDT (TRC-20)** y señales más comunes. Puedes ampliar a otros tokens o categorías (DEX/CEXs etiquetados) añadiendo listas.
 * **Recencia de datos**: algunas APIs tienen paginación o límites. Si necesitas un histórico más amplio, implementa paginado/lotes.
 

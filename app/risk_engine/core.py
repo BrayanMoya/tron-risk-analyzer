@@ -8,7 +8,6 @@ from ..sources.trongrid import account_overview, account_trc20_transfers, USDT_C
 from .weights import W
 
 
-CACHE_MINUTES = int(os.getenv("CACHE_MINUTES", "15"))
 DUST_MICRO_USDT = Decimal(os.getenv("DUST_MICRO_USDT", "0.1"))
 DUST_SMALL_USDT = Decimal(os.getenv("DUST_SMALL_USDT", "1.0"))
 DUST_MIN_EVENTS = int(os.getenv("DUST_MIN_EVENTS", "3"))
