@@ -31,4 +31,11 @@ async def account_trc20_transfers(address_b58: str, limit=200, min_timestamp=Non
     async with httpx.AsyncClient(timeout=20.0) as client:
         r = await client.get(url, params=params)
         r.raise_for_status()
-        return r.json()
+        j = r.json() or {}
+        data = j.get("data")
+        if not isinstance(data, list):
+            data = j.get("token_transfers")
+            if not isinstance(data, list):
+                data = []
+        j["data"] = data
+        return j

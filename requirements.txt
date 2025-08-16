@@ -4,5 +4,4 @@ httpx
 reportlab
 base58
 python-dotenv
-sqlalchemy
 jinja2

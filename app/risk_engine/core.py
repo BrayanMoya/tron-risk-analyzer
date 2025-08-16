@@ -6,8 +6,6 @@ import os
 from ..sources.tronscan import check_account_security, check_stablecoin_blacklist, trc20_transfers
 from ..sources.trongrid import account_overview, account_trc20_transfers, USDT_CONTRACT
 from .weights import W
-from ..storage.db import SessionLocal
-from ..storage.models import Analysis
 
 
 CACHE_MINUTES = int(os.getenv("CACHE_MINUTES", "15"))
@@ -37,11 +35,26 @@ def fmt_time(ms: int | None) -> str | None:
     return f"{dt.strftime('%Y-%m-%d')}, {hour}:{minute} {ampm}"
 
 def build_basic_info(tron_account: dict) -> dict:
-    tron_account = tron_account.get("data", [])
+    def pick(d: dict) -> dict:
+        if not isinstance(d, dict):
+            return {}
+        if "data" in d:
+            inner = d.get("data")
+            if isinstance(inner, dict):
+                return inner
+            if isinstance(inner, list) and inner:
+                return inner[0]
+        return d  # ya es objeto plano
+
+    obj = pick(tron_account or {})
+    balance = obj.get("balance")
+    create_ts = obj.get("create_time") or obj.get("createTime")
+    last_op_ts = obj.get("latest_opration_time") or obj.get("latest_operation_time")
+
     return {
-        "balance_trx_raw": tron_account[0].get("balance"),
-        "created_at": fmt_time(tron_account[0].get("create_time")),
-        "last_operation_at": fmt_time(tron_account[0].get("latest_opration_time")),
+        "balance_trx_raw": balance,
+        "created_at": fmt_time(create_ts) if create_ts else None,
+        "last_operation_at": fmt_time(last_op_ts) if last_op_ts else None,
     }
 
 def build_summary(level: str, reasons: List[Dict[str, Any]]) -> str:
@@ -153,50 +166,9 @@ def _exposure_breakdown(risky_in_cnt, risky_out_cnt, dust_in_cnt, dust_out_cnt, 
     if cex_hits: add("Exchange", cex_hits)
     return expo
 
-# ----------- CACHE: lee último análisis si es reciente -----------
-def _get_cached(address: str):
-    if CACHE_MINUTES <= 0:
-        return None
-    db = SessionLocal()
-    try:
-        row = db.query(Analysis).filter(Analysis.address == address).order_by(Analysis.created_at.desc()).first()
-        if not row:
-            return None
-        age = datetime.now(timezone.utc) - (row.created_at.replace(tzinfo=timezone.utc) if row.created_at.tzinfo is None else row.created_at)
-        if age <= timedelta(minutes=CACHE_MINUTES) and row.snapshot:
-            return row.snapshot  # dict completo
-        return None
-    finally:
-        db.close()
-
-def _store_result(address: str, result: dict):
-    db = SessionLocal()
-    try:
-        row = Analysis(
-            address=address,
-            risk_score=int(result.get("risk_score", 0)),
-            risk_level=result.get("risk_level", ""),
-            reasons=result.get("reasons", []),
-            summary=result.get("summary", ""),
-            snapshot=result  # guarda el resultado para cache
-        )
-        db.add(row)
-        db.commit()
-    except Exception as e:
-        # Log explícito para depurar si algo falla
-        print(f"[AUDIT SAVE ERROR] {e}")
-        raise
-    finally:
-        db.close()
 
 # ------------------- FUNCIÓN PRINCIPAL -------------------
-async def score_wallet(address_b58: str, audit: bool = False) -> dict:
-    # 0) cache
-    if audit:
-        cached = _get_cached(address_b58)
-        if cached:
-            return cached
-
+async def score_wallet(address_b58: str) -> dict:
     reasons: List[Dict[str, Any]] = []
     score = 0
 
@@ -219,7 +191,9 @@ async def score_wallet(address_b58: str, audit: bool = False) -> dict:
     # Info básica y TRC20
     acct = await account_overview(address_b58)
     trc20 = await account_trc20_transfers(address_b58, limit=200)
-    items = trc20.get("data", []) or trc20.get("token_transfers", [])
+    items = trc20.get("data", []) or []
+    if not isinstance(items, list):
+        items = []
 
     # 1-hop counterparties
     ins, outs = _extract_counterparties_trc20(items, address_b58)
@@ -280,7 +254,4 @@ async def score_wallet(address_b58: str, audit: bool = False) -> dict:
         "exposure": _exposure_breakdown(len(risky_in), len(risky_out), dust_in, dust_out),
     }
 
-    # 3) guardar en DB y devolver
-    if audit:
-        _store_result(address_b58, result)
     return result

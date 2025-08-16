@@ -1,20 +1,17 @@
-from dotenv import load_dotenv
+# app/main.py
 import os
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from tempfile import mkstemp
-from .risk_engine.core import score_wallet
-from .pdf_report.build import build_pdf
-from .storage.db import maybe_init_db
-from .web_ui import router as web_ui_router
-from sqlalchemy import func
-from .storage.db import SessionLocal
-from .storage.models import Analysis
 
+from dotenv import load_dotenv
 load_dotenv()
 
-AUDIT_MODE = os.getenv("AUDIT_MODE", "false").lower() == "true"
+from .risk_engine.core import score_wallet
+from .pdf_report.build import build_pdf
+from .web_ui import router as web_ui_router
+from .storage.snapshots import save_snapshot, load_snapshot, clear_snapshot
 
 app = FastAPI(title="TRON Risk API", version="0.1")
 
@@ -27,10 +24,6 @@ app.add_middleware(
 
 app.include_router(web_ui_router)
 
-@app.on_event("startup")
-async def _startup():
-    maybe_init_db(AUDIT_MODE)
-
 @app.get("/health")
 async def health():
     return {"ok": True}
@@ -38,28 +31,22 @@ async def health():
 @app.get("/risk/{address}")
 async def risk(address: str):
     try:
-        result = await score_wallet(address, audit=AUDIT_MODE)
+        result = await score_wallet(address)
+        save_snapshot(address, result)
         return result
+    except IndexError:
+        raise HTTPException(400, detail="Respuesta de la API vacía o inesperada (IndexError).")
     except Exception as e:
         raise HTTPException(400, detail=str(e))
 
 @app.get("/report/{address}")
 async def report(address: str):
-    result = await score_wallet(address, audit=AUDIT_MODE)
+    snap = load_snapshot(address)
+    if snap is None:
+        snap = await score_wallet(address)
+        save_snapshot(address, snap)
     path = mkstemp(suffix=".pdf")[1]
-    build_pdf(address, result, path)
-    return FileResponse(path, media_type="application/pdf", filename=f"tron-risk-{address}.pdf")
-
-@app.get("/debug/audit-status")
-def audit_status():
-    db = SessionLocal()
-    try:
-        total = db.query(func.count(Analysis.id)).scalar()
-        return {
-            "AUDIT_MODE_env": os.getenv("AUDIT_MODE"),
-            "AUDIT_MODE_active": AUDIT_MODE,
-            "CACHE_MINUTES": os.getenv("CACHE_MINUTES", "15"),
-            "rows_in_db": total
-        }
-    finally:
-        db.close()
+    build_pdf(address, snap, path)
+    pdf = FileResponse(path, media_type="application/pdf", filename=f"tron-risk-{address}.pdf")
+    clear_snapshot(address)
+    return pdf

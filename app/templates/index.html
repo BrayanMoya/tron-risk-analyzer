@@ -1,96 +1,165 @@
 <!doctype html>
 <html lang="es">
 <head>
-  <meta charset="utf-8" />
-  <title>TRON Wallet Risk Analyzer</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <!-- Tailwind via CDN (solo para estilo rápido) -->
-  <script src="https://cdn.tailwindcss.com"></script>
-  <style>
-    .risk-bar { transition: width .4s ease; }
-  </style>
+    <meta charset="utf-8"/>
+    <title>TRON Wallet Risk Analyzer</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1"/>
+    <!-- Tailwind via CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- ZXing (decodificación QR en navegador) -->
+    <script src="https://unpkg.com/@zxing/library@latest/umd/index.min.js"></script>
+    <style>
+        .risk-bar { transition: width .4s ease; }
+        video { transform: scaleX(-1); } /* espejo para cámara frontal */
+    </style>
 </head>
 <body class="bg-slate-50 text-slate-800">
-  <header class="bg-white shadow">
+<header class="bg-white shadow">
     <div class="max-w-4xl mx-auto px-4 py-5 flex items-center justify-between">
-      <h1 class="text-xl font-semibold">TRON Wallet Risk Analyzer</h1>
-      <a href="/docs" class="text-sm text-indigo-600 hover:underline">API Docs</a>
+        <h1 class="text-xl font-semibold">TRON Wallet Risk Analyzer</h1>
+        <nav class="flex items-center gap-4">
+            <a href="/docs" class="text-sm text-indigo-600 hover:underline">API Docs</a>
+        </nav>
     </div>
-  </header>
+</header>
 
-  <main class="max-w-4xl mx-auto px-4 py-6">
-    <!-- Card: Entrada -->
+<main class="max-w-4xl mx-auto px-4 py-6">
+    <!-- Entrada manual -->
     <div class="bg-white rounded-xl shadow p-4 md:p-6">
-      <label for="addr" class="block text-sm font-medium mb-2">Dirección TRON (T...)</label>
-      <div class="flex gap-2">
-        <input id="addr" type="text" placeholder="Txxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-               class="flex-1 border border-slate-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500">
-        <button id="btnAnalyze"
-                class="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50">
-          Analizar
-        </button>
-      </div>
-      <p id="hint" class="text-xs text-slate-500 mt-2">Ejemplo: TDLcipJPJMT6iCFava8B9A1gGiKJvBRWzn</p>
+        <label for="addr" class="block text-sm font-medium mb-2">Dirección TRON (T...)</label>
+        <div class="flex gap-2">
+            <input id="addr" type="text" placeholder="Txxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                   class="flex-1 border border-slate-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+            <button id="btnAnalyze"
+                    class="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50">
+                Analizar
+            </button>
+        </div>
+        <p id="hint" class="text-xs text-slate-500 mt-2">Ejemplo: TDLcipJPJMT6iCFava8B9A1gGiKJvBRWzn</p>
     </div>
+
+    <!-- NUEVO: Lector QR -->
+    <section class="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <!-- Modo cámara -->
+        <div class="bg-white rounded-xl shadow p-4 md:p-6">
+            <div class="flex items-center justify-between mb-3">
+                <h2 class="text-base font-semibold">Escanear QR (Cámara)</h2>
+                <div class="text-xs text-slate-500">Funciona en <strong>localhost</strong> sin HTTPS.</div>
+            </div>
+            <div class="space-y-3">
+                <div class="flex items-center gap-2">
+                    <select id="cameraSelect" class="flex-1 border border-slate-300 rounded-lg px-3 py-2"></select>
+                    <button id="btnStartCam" class="bg-slate-700 text-white px-3 py-2 rounded-lg hover:bg-slate-800">
+                        Iniciar
+                    </button>
+                    <button id="btnStopCam" class="bg-slate-200 px-3 py-2 rounded-lg hover:bg-slate-300">Detener
+                    </button>
+                </div>
+                <div class="rounded-lg overflow-hidden bg-black">
+                    <video id="video" class="w-full h-64 object-cover" muted playsinline></video>
+                </div>
+                <div class="text-sm text-slate-600">
+                    Resultado: <span id="qrCamResult" class="font-mono break-all">—</span>
+                </div>
+                <div>
+                    <button id="btnUseCamResult"
+                            class="bg-emerald-600 text-white px-3 py-2 rounded-lg hover:bg-emerald-700 disabled:opacity-50"
+                            disabled>
+                        Usar dirección detectada
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Modo imagen -->
+        <div class="bg-white rounded-xl shadow p-4 md:p-6">
+            <h2 class="text-base font-semibold mb-3">Escanear QR (Imagen)</h2>
+            <div class="space-y-3">
+                <input id="fileInput" type="file" accept="image/*" class="block w-full text-sm text-slate-600
+            file:mr-4 file:py-2 file:px-4
+            file:rounded-lg file:border-0
+            file:text-sm file:font-semibold
+            file:bg-indigo-50 file:text-indigo-700
+            hover:file:bg-indigo-100"/>
+                <div class="rounded-lg overflow-hidden bg-slate-100 flex items-center justify-center min-h-32">
+                    <img id="previewImg" alt="" class="max-h-64"/>
+                </div>
+                <div class="text-sm text-slate-600">
+                    Resultado: <span id="qrFileResult" class="font-mono break-all">—</span>
+                </div>
+                <div>
+                    <button id="btnUseFileResult"
+                            class="bg-emerald-600 text-white px-3 py-2 rounded-lg hover:bg-emerald-700 disabled:opacity-50"
+                            disabled>
+                        Usar dirección detectada
+                    </button>
+                </div>
+            </div>
+        </div>
+    </section>
 
     <!-- Resultado -->
     <section id="result" class="hidden mt-6 space-y-6">
-      <!-- Encabezado riesgo -->
-      <div class="bg-white rounded-xl shadow p-4 md:p-6">
-        <div class="flex items-center justify-between mb-3">
-          <h2 class="text-lg font-semibold">Resultado</h2>
-          <a id="btnPdf" href="#" target="_blank"
-             class="inline-flex items-center gap-2 bg-emerald-600 text-white px-3 py-2 rounded-lg hover:bg-emerald-700">
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor"><path d="M6 2a1 1 0 0 0-1 1v16h14V3a1 1 0 0 0-1-1H6zm-3 18a1 1 0 0 0 1 1h16a1 1 0 1 0 0-2H4a1 1 0 0 0-1 1z"/></svg>
-            Descargar PDF
-          </a>
+        <!-- Encabezado riesgo -->
+        <div class="bg-white rounded-xl shadow p-4 md:p-6">
+            <div class="flex items-center justify-between mb-3">
+                <h2 class="text-lg font-semibold">Resultado</h2>
+                <a id="btnPdf" href="#" target="_blank"
+                   class="inline-flex items-center gap-2 bg-emerald-600 text-white px-3 py-2 rounded-lg hover:bg-emerald-700">
+                    <!-- icon -->
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M6 2a1 1 0 0 0-1 1v16h14V3a1 1 0 0 0-1-1H6zm-3 18a1 1 0 0 0 1 1h16a1 1 0 1 0 0-2H4a1 1 0 0 0-1 1z"/>
+                    </svg>
+                    Descargar PDF
+                </a>
+            </div>
+
+            <div class="space-y-2">
+                <div class="flex items-center gap-3">
+                    <div class="text-sm text-slate-600">Risk Score</div>
+                    <div id="scoreVal" class="text-lg font-semibold">0</div>
+                    <span id="levelBadge" class="text-xs font-semibold px-2 py-1 rounded bg-slate-200">-</span>
+                </div>
+
+                <div class="w-full bg-slate-200 rounded-full h-3 overflow-hidden">
+                    <div id="riskBar" class="risk-bar h-3 rounded-full" style="width:0%"></div>
+                </div>
+
+                <div class="text-sm text-slate-600"><span class="font-medium">Resumen:</span> <span
+                        id="summary">—</span></div>
+            </div>
         </div>
 
-        <div class="space-y-2">
-          <div class="flex items-center gap-3">
-            <div class="text-sm text-slate-600">Risk Score</div>
-            <div id="scoreVal" class="text-lg font-semibold">0</div>
-            <span id="levelBadge" class="text-xs font-semibold px-2 py-1 rounded bg-slate-200">-</span>
-          </div>
-
-          <div class="w-full bg-slate-200 rounded-full h-3 overflow-hidden">
-            <div id="riskBar" class="risk-bar h-3 rounded-full" style="width:0%"></div>
-          </div>
-
-          <div class="text-sm text-slate-600"><span class="font-medium">Resumen:</span> <span id="summary">—</span></div>
+        <!-- Overview -->
+        <div class="bg-white rounded-xl shadow p-4 md:p-6">
+            <h3 class="text-base font-semibold mb-3">Información básica</h3>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-1 text-sm">
+                <div><span class="font-medium">Creada:</span> <span id="createdAt">—</span></div>
+                <div><span class="font-medium">Última operación:</span> <span id="lastOp">—</span></div>
+                <div><span class="font-medium">Primer transfer:</span> <span id="firstTx">—</span></div>
+                <div><span class="font-medium">Último transfer:</span> <span id="lastTx">—</span></div>
+                <div><span class="font-medium">Inflow USDT:</span> <span id="inflow">—</span></div>
+                <div><span class="font-medium">Outflow USDT:</span> <span id="outflow">—</span></div>
+            </div>
         </div>
-      </div>
 
-      <!-- Overview -->
-      <div class="bg-white rounded-xl shadow p-4 md:p-6">
-        <h3 class="text-base font-semibold mb-3">Información básica</h3>
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-1 text-sm">
-          <div><span class="font-medium">Creada:</span> <span id="createdAt">—</span></div>
-          <div><span class="font-medium">Última operación:</span> <span id="lastOp">—</span></div>
-          <div><span class="font-medium">Primer transfer:</span> <span id="firstTx">—</span></div>
-          <div><span class="font-medium">Último transfer:</span> <span id="lastTx">—</span></div>
-          <div><span class="font-medium">Inflow USDT:</span> <span id="inflow">—</span></div>
-          <div><span class="font-medium">Outflow USDT:</span> <span id="outflow">—</span></div>
+        <!-- Exposure -->
+        <div class="bg-white rounded-xl shadow p-4 md:p-6">
+            <h3 class="text-base font-semibold mb-3">Exposure</h3>
+            <div id="exposure" class="flex flex-wrap gap-2 text-sm"></div>
         </div>
-      </div>
 
-      <!-- Exposure -->
-      <div class="bg-white rounded-xl shadow p-4 md:p-6">
-        <h3 class="text-base font-semibold mb-3">Exposure</h3>
-        <div id="exposure" class="flex flex-wrap gap-2 text-sm"></div>
-      </div>
-
-      <!-- Razones -->
-      <div class="bg-white rounded-xl shadow p-4 md:p-6">
-        <h3 class="text-base font-semibold mb-3">Razones</h3>
-        <ul id="reasons" class="space-y-2 text-sm"></ul>
-      </div>
+        <!-- Razones -->
+        <div class="bg-white rounded-xl shadow p-4 md:p-6">
+            <h3 class="text-base font-semibold mb-3">Razones</h3>
+            <ul id="reasons" class="space-y-2 text-sm"></ul>
+        </div>
     </section>
 
     <div id="alert" class="hidden mt-6 bg-red-50 text-red-800 border border-red-200 rounded-lg p-4 text-sm"></div>
-  </main>
+</main>
 
-  <script>
+<script>
     const addrInput = document.getElementById('addr');
     const btn = document.getElementById('btnAnalyze');
     const result = document.getElementById('result');
@@ -114,32 +183,27 @@
       if (score >= 30) return ['Medium', 'bg-amber-500'];
       return ['Low', 'bg-emerald-500'];
     }
-
     function showError(msg) {
       alertBox.textContent = msg || 'Ocurrió un error';
       alertBox.classList.remove('hidden');
       result.classList.add('hidden');
     }
+    function hideError() { alertBox.classList.add('hidden'); }
 
-    function hideError() {
-      alertBox.classList.add('hidden');
-    }
+    // ---------- Analizar ----------
+    btn.addEventListener('click', doAnalyze);
+    addrInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') doAnalyze(); });
 
-    btn.addEventListener('click', async () => {
+    async function doAnalyze() {
       const a = addrInput.value.trim();
       if (!a) return showError('Ingresa una dirección TRON que comience con T');
 
       btn.disabled = true; hideError();
-
       try {
         const r = await fetch(`/risk/${encodeURIComponent(a)}`);
-        if (!r.ok) {
-          const tx = await r.text();
-          throw new Error(tx || 'Solicitud fallida');
-        }
+        if (!r.ok) throw new Error(await r.text() || 'Solicitud fallida');
         const data = await r.json();
 
-        // Barra y nivel
         const score = Math.max(0, Math.min(100, parseInt(data.risk_score || 0)));
         const [level, cls] = setLevelColor(score);
         scoreVal.textContent = score;
@@ -149,7 +213,6 @@
         riskBar.className = `risk-bar h-3 rounded-full ${cls}`;
         summary.textContent = data.summary || '—';
 
-        // Básicos
         const b = data.basic_info || {};
         createdAt.textContent = b.created_at || '—';
         lastOp.textContent = b.last_operation_at || '—';
@@ -158,7 +221,6 @@
         inflow.textContent = b.inflow_usdt || '—';
         outflow.textContent = b.outflow_usdt || '—';
 
-        // Exposure
         exposure.innerHTML = '';
         (data.exposure || []).forEach(ex => {
           const chip = document.createElement('span');
@@ -167,7 +229,6 @@
           exposure.appendChild(chip);
         });
 
-        // Razones
         reasons.innerHTML = '';
         (data.reasons || []).forEach(rz => {
           const li = document.createElement('li');
@@ -177,21 +238,164 @@
           reasons.appendChild(li);
         });
 
-        // PDF
         btnPdf.href = `/report/${encodeURIComponent(a)}`;
-
         result.classList.remove('hidden');
       } catch (err) {
         showError(err.message);
       } finally {
         btn.disabled = false;
       }
-    });
+    }
 
-    // Enter para analizar
-    addrInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') btn.click();
+    // ---------- NUEVO: QR helpers ----------
+    // Extrae la dirección TRON de un payload de QR (soporta: "tron:T...", "T...", URIs con query)
+    const TRON_ADDR_RE = /T[1-9A-HJ-NP-Za-km-z]{33}/; // Base58 sin 0 O I l
+    function extractTronAddress(text) {
+      if (!text) return null;
+      const cleaned = String(text).trim();
+      const m = cleaned.match(TRON_ADDR_RE);
+      return m ? m[0] : null;
+    }
+    function setDetectedAddress(addr, sourceElem, useBtn) {
+      sourceElem.textContent = addr || '—';
+      useBtn.disabled = !addr;
+    }
+
+    // ---------- QR: Cámara ----------
+  const cameraSelect = document.getElementById('cameraSelect'); // seguirá visible pero no es obligatorio
+  const btnStartCam = document.getElementById('btnStartCam');
+  const btnStopCam  = document.getElementById('btnStopCam');
+  const video = document.getElementById('video');
+  const qrCamResult = document.getElementById('qrCamResult');
+  const btnUseCamResult = document.getElementById('btnUseCamResult');
+
+  const codeReader = new ZXing.BrowserQRCodeReader();
+  let running = false;
+  let currentFacing = 'environment'; // environment = trasera, user = frontal
+  let currentStream = null;
+
+  function insecureContextMsg() {
+    return 'La cámara requiere HTTPS o localhost. Abre la URL con https:// (ngrok te da un enlace HTTPS).';
+  }
+  function isSecureEnough() {
+    const h = location.hostname;
+    return location.protocol === 'https:' || h === 'localhost' || h === '127.0.0.1';
+  }
+  function setDetectedAddress(addr) {
+    qrCamResult.textContent = addr || '—';
+    btnUseCamResult.disabled = !addr;
+  }
+  function mirrorVideoForFacing() {
+    // espejo solo para la frontal
+    video.style.transform = (currentFacing === 'user') ? 'scaleX(-1)' : 'none';
+  }
+
+  async function startWithConstraints(facing) {
+    currentFacing = facing || 'environment';
+    mirrorVideoForFacing();
+    // constraints para móviles (no usamos deviceId)
+    const constraints = {
+      audio: false,
+      video: {
+        facingMode: { ideal: currentFacing },
+        // sugerencias de tamaño (opcionales)
+        width:  { ideal: 1280 },
+        height: { ideal: 720 }
+      }
+    };
+
+    // 1) Asegura contexto seguro
+    if (!isSecureEnough()) {
+      showError(insecureContextMsg());
+      throw new Error('insecure-context');
+    }
+
+    // 2) Pide permiso iniciando un stream básico (algunos navegadores lo requieren antes de decodificar)
+    try {
+      currentStream = await navigator.mediaDevices.getUserMedia(constraints);
+      // conecta el stream al <video> para feedback inmediato
+      video.srcObject = currentStream;
+      await video.play().catch(()=>{});
+    } catch (e) {
+      if (e && e.name === 'NotAllowedError') {
+        showError('Permiso de cámara denegado. Concede acceso para escanear QR.');
+      } else if (e && e.name === 'NotFoundError') {
+        showError('No se encontró ninguna cámara en este dispositivo.');
+      } else {
+        showError('No se pudo iniciar la cámara. Revisa permisos/navegador.');
+      }
+      throw e;
+    }
+
+    // 3) Inicia decodificación con ZXing usando constraints (sin deviceId)
+    await codeReader.decodeFromConstraints(constraints, video, (result, err) => {
+      if (result) {
+        const addr = extractTronAddress(result.getText());
+        setDetectedAddress(addr);
+      }
+      // los errores “normales” del escaneo se ignoran para seguir intentando
     });
-  </script>
+  }
+
+  async function startCamera() {
+    if (running) return;
+    hideError();
+    qrCamResult.textContent = '—';
+    btnUseCamResult.disabled = true;
+    running = true;
+
+    try {
+      // Intento con cámara trasera
+      await startWithConstraints('environment');
+    } catch (e) {
+      // Fallback: intenta frontal si la trasera no está disponible
+      if (e && e.name === 'NotFoundError') {
+        try {
+          await startWithConstraints('user');
+        } catch (e2) {
+          running = false;
+          return; // showError ya mostrado
+        }
+      } else {
+        running = false;
+        return;
+      }
+    }
+  }
+
+  async function stopCamera() {
+    try { await codeReader.reset(); } catch {}
+    if (currentStream) {
+      try { currentStream.getTracks().forEach(t => t.stop()); } catch {}
+      currentStream = null;
+    }
+    running = false;
+  }
+
+  btnStartCam.addEventListener('click', startCamera);
+  btnStopCam.addEventListener('click', stopCamera);
+  btnUseCamResult.addEventListener('click', () => {
+    const addr = extractTronAddress(qrCamResult.textContent);
+    if (addr) { addrInput.value = addr; doAnalyze(); }
+  });
+
+  // Rellenar select si el navegador lo soporta, pero NO lo necesitamos para móviles
+  (async () => {
+    if (!isSecureEnough()) return;
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const vids = devices.filter(d => d.kind === 'videoinput');
+      cameraSelect.innerHTML = '';
+      vids.forEach((d, i) => {
+        const opt = document.createElement('option');
+        opt.value = d.deviceId || '';
+        opt.textContent = d.label || `Cámara ${i+1}`;
+        cameraSelect.appendChild(opt);
+      });
+      // Nota: en muchos móviles Samsung este select quedará vacío o sin labels; no pasa nada,
+      // el escaneo por constraints (botón Iniciar) funciona igual.
+    } catch {}
+  })();
+</script>
 </body>
 </html>
