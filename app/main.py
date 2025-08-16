@@ -1,6 +1,6 @@
 # app/main.py
 import os
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from tempfile import mkstemp
@@ -24,8 +24,10 @@ app.add_middleware(
 
 app.include_router(web_ui_router)
 
-@app.get("/health")
-async def health():
+@app.api_route("/health", methods=["GET", "HEAD"])
+async def health(request: Request):
+    if request.method == "HEAD":
+        return Response(status_code=200)
     return {"ok": True}
 
 @app.get("/risk/{address}")
