@@ -34,3 +34,12 @@ async def trc20_transfers(address: str, start=0, limit=200) -> dict:
         r = await client.get(url, params=params, headers=_headers())
         r.raise_for_status()
         return r.json()
+
+
+async def transaction_info(tx_hash: str) -> dict:
+    """Detalle completo de una transacción (incluye tx del multisig que dispara AddedBlackList)."""
+    url = f"{TRONSCAN_BASE}/api/transaction-info"
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        r = await client.get(url, params={"hash": tx_hash}, headers=_headers())
+        r.raise_for_status()
+        return r.json() or {}

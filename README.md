@@ -1,13 +1,16 @@
 # TRON Wallet Risk Analyzer — README
 
-Análisis de riesgo para direcciones TRON (USDT/TRC20) con **FastAPI (Python)** + **Flutter**. Genera:
+Análisis de riesgo para direcciones TRON (USDT/TRC20) con **FastAPI (Python)**.
+Genera:
 
 * **Porcentaje de riesgo** y **nivel** (Low/Medium/High)
-* **Razones explicables**
+* **Razones explicables** (códigos y pesos)
 * **Exposure** (a qué está expuesta la wallet)
-* **PDF** descargable con el reporte
+* **PDF** descargable con el reporte completo:
 
-Este README incluye instalación, uso y un **glosario para no expertos** con todos los términos que verás en el PDF.
+  * **Direcciones y transacciones clicables** (abren en TronScan)
+  * **Evidencia de blacklist (USDT)**
+  * **Tabla de transacciones relevantes** alrededor del bloqueo
 
 ---
 
@@ -26,7 +29,7 @@ Este README incluye instalación, uso y un **glosario para no expertos** con tod
 backend/
   app/
     main.py                 # FastAPI
-    pdf_report/build.py     # Generación de PDF
+    pdf_report/build.py     # Generación de PDF (enlaces y tablas)
     risk_engine/
       core.py               # Lógica de scoring
       weights.py            # Pesos del modelo
@@ -51,221 +54,239 @@ mobile/ (opcional, Flutter)
 
 1. **Backend**
 
-   * Abre PowerShell o CMD:
+```bat
+cd backend
+copy .env.example .env
+```
 
-     ```bat
-     cd backend
-     copy .env.example .env
-     ```
-   * Edita `.env` y completa:
+Edita `.env` y completa (ver tabla de variables abajo). Luego:
 
-     ```
-     TRONSCAN_API_KEY=TU_KEY_OPCIONAL
-     HOST=0.0.0.0
-     PORT=8000
-     DUST_MICRO_USDT=0.1
-     DUST_SMALL_USDT=1.0
-     DUST_MIN_EVENTS=3
-     ```
+```bat
+run.bat
+```
 
-   * Ejecuta:
-
-     ```bat
-     run.bat
-     ```
-   * La API queda en: `http://127.0.0.1:8000`
-     Documentación interactiva: `http://127.0.0.1:8000/docs`
-
-2. **Cliente móvil (opcional)**
-
-   * Crea un proyecto Flutter o usa el stub de `mobile/`.
-   * Construye APK apuntando al backend en tu red local:
-
-     ```bash
-     flutter build apk --release --dart-define=API_BASE=http://<TU_IP_PC>:8000
-     ```
-   * Instala el APK en el teléfono y prueba.
+* API: `http://127.0.0.1:8000`
+* Docs: `http://127.0.0.1:8000/docs`
 
 ---
 
-## 4) Endpoints
+## 4) Variables de entorno
 
-* `GET /health`
-  Estado del servicio.
+| Variable            | Descripción                                                                       | Ejemplo / Default                    |
+| ------------------- | --------------------------------------------------------------------------------- | ------------------------------------ |
+| `HOST`              | Host del servidor FastAPI.                                                        | `0.0.0.0`                            |
+| `PORT`              | Puerto del servidor.                                                              | `8000`                               |
+| `TRONSCAN_API_KEY`  | API key de TronScan (opcional, pero recomendable).                                | *(vacío)*                            |
+| `USDT_CONTRACT`     | Contrato oficial de USDT TRC-20 que se analiza.                                   | `TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t` |
+| `USDT_MAX_EVENT`    | Máximo valor permitido por evento (sanidad de datos).                             | `1e12`                               |
+| `DUST_MICRO_USDT`   | Umbral para “micro” (USDT).                                                       | `0.1`                                |
+| `DUST_SMALL_USDT`   | Umbral para “small” (USDT).                                                       | `1.0`                                |
+| `DUST_MIN_EVENTS`   | Mínimo de eventos “dust” para activar penalización.                               | `3`                                  |
+| `BL_TIME_WINDOW_MS` | Ventana temporal ± alrededor del evento de blacklist para la tabla de relevancia. | `259200000` (3 días)                 |
+| `BL_MIN_USDT`       | Mínimo de USDT por transferencia para aparecer en la tabla de relevancia.         | `10000`                              |
+| `RISK_SUSPECTS`     | Lista (coma-separada) de addresses a marcar como “sospechosas” explícitas.        | `TQQeZmH1ZU2AFv3c93rZaKUZ2bftTGxDK9` |
 
-* `GET /risk/{address}`
-  Devuelve JSON con:
+> **Notas**
+> • El sistema sólo computa **USDT TRC-20** del contrato oficial.
+> • `RISK_SUSPECTS` complementa la detección de contrapartes riesgosas 1-hop.
 
+---
+
+## 5) Endpoints
+
+| Método | Endpoint            | Descripción                                                    |
+| ------ | ------------------- | -------------------------------------------------------------- |
+| `GET`  | `/health`           | Estado del servicio.                                           |
+| `GET`  | `/risk/{address}`   | JSON con score, nivel, razones, exposure, básicos y evidencia. |
+| `GET`  | `/report/{address}` | Genera y descarga el **PDF** completo.                         |
+
+### JSON con análisis
   * `risk_score` (0–100)
   * `risk_level` (`Low|Medium|High`)
   * `reasons` (lista de causas y pesos)
   * `basic_info` (fechas, flujos agregados, contadores)
   * `exposure` (categorías y porcentaje)
-
-* `GET /report/{address}`
-  Genera y descarga el **PDF** del análisis.
-
 ---
 
-## 5) ¿Cómo funciona el análisis?
+## 6) ¿Cómo funciona el análisis?
 
-### 5.1 Señales que revisa
+### 6.1 Señales que revisa
 
-* **Listas negras de USDT**: si la dirección está bloqueada/reportada por Tether/TronScan.
-* **Flags de fraude**: si TronScan marca comportamiento sospechoso.
-* **Contrapartes 1-hop**: analiza con quién transfiere la wallet (entradas/salidas). Si esas contrapartes están en riesgo, suma puntos.
-* **DUST (micro-transacciones)**: muchos movimientos muy pequeños pueden indicar spam, dusting o patrones automáticos.
+* **Listas negras de USDT** (contrato oficial): si la dirección está en blacklist del token.
+* **Flags de fraude** (TronScan): marcadores de actividad sospechosa.
+* **Contrapartes 1-hop**: con quién interactúa directamente (entradas/salidas). Si esas contrapartes tienen riesgo, suma puntos.
+* **DUST** (micro-transacciones): actividad con montos muy pequeños (spam/dusting/patrones automáticos).
+* **Evidencia de blacklist**: si existe, captura **hash, timestamp, ejecutor multisig** y **transacciones relevantes** alrededor del evento.
 
-### 5.2 Pesos del modelo (MVP)
+### 6.2 Pesos del modelo (MVP)
 
 * `BLACKLIST_USDT` (directo): **100** (riesgo **High** inmediato)
+* `BLACKLIST_USDT_EVIDENCE`: se eleva a severidad de blacklist si no vino por `is_black_list`.
 * `FRAUD_FLAG`: **+20**
-* `COUNTERPARTY_HIGH` (1-hop): **+12** por contraparte riesgosa (tope **+36**)
-* `DUST_ACTIVITY`: si hay ≥ `DUST_MIN_EVENTS`
-  **+5** base + **1** por evento extra (tope **+15**)
+* `COUNTERPARTY_HIGH` (1-hop): **+12** por contraparte (tope **+36**)
+* `DUST_ACTIVITY`: si hay ≥ `DUST_MIN_EVENTS` → **+5** base + **1** por evento extra (tope **+15**)
 
-**Nivel**
+**Niveles:** `0–29` Low, `30–69` Medium, `70–100` High
 
-* `0–29`: Low
-* `30–69`: Medium
-* `70–100`: High
-
-> Los umbrales de DUST se ajustan en `.env`:
->
-> * `DUST_MICRO_USDT` (p.ej. 0.10)
-> * `DUST_SMALL_USDT` (p.ej. 1.00)
-> * `DUST_MIN_EVENTS` (p.ej. 3)
+> Los umbrales DUST se ajustan en `.env`:
+> `DUST_MICRO_USDT`, `DUST_SMALL_USDT`, `DUST_MIN_EVENTS`.
 
 ---
 
-## 6) Campos del PDF y cómo interpretarlos (para no expertos)
+## 7) Qué contiene el PDF
 
-### Encabezado
+> El PDF está pensado para que **cualquiera** (no técnico) pueda leerlo y **verificar** en TronScan con un clic.
 
-* **Risk Score (0–100)**: cifra global de riesgo.
-* **Risk Level**: Low / Medium / High (bajo, medio, alto).
-* **Summary**: frases cortas con las señales detectadas.
+### 7.1 Encabezado general
 
-### Overview
+| Campo                  | Qué es                                            | Cómo leerlo                                 |
+| ---------------------- | ------------------------------------------------- | ------------------------------------------- |
+| **Address**            | La dirección TRON analizada (empieza por **T…**). | Identifica la wallet dueña de los fondos.   |
+| **Risk Score (0–100)** | Puntaje global del modelo.                        | Cuanto más alto, más señales de riesgo.     |
+| **Risk Level**         | Low / Medium / High.                              | Traducción del puntaje a nivel.             |
+| **Resumen**            | Frase corta con las señales más fuertes.          | Contexto rápido para ejecutivos/compliance. |
 
-* **Inflow USDT / Outflow USDT**
-  Suma aproximada de **entradas** y **salidas** de USDT (token TRC-20 en TRON) en el período analizado.
+### 7.2 Overview (básicos operativos)
 
-  * Se muestran con 2 decimales y separador de miles: `359,011.06`.
-  * Sin notación científica (“E+…”) y con filtros para descartar outliers técnicos.
-* **First tx / Last tx**
-  Primera y última transferencia **observada** en el set inspeccionado, en formato `YYYY-MM-DD, h:mm am/pm` (UTC).
-* **Created at / Last operation at**
-  Tiempos de creación de la cuenta y última operación según TronGrid, mismos formato y zona.
+| Campo                           | Qué es                                                     | Cómo leerlo                                   |
+| ------------------------------- | ---------------------------------------------------------- | --------------------------------------------- |
+| **Entradas (TRC20 USDT aprox)** | Suma de USDT recibidos (filtrando outliers).               | 2 decimales + miles (p. ej., `359,011.06`).   |
+| **Salidas (TRC20 USDT aprox)**  | Suma de USDT enviados.                                     | Igual formato que entradas.                   |
+| **Primera transferencia**       | Marca de tiempo (UTC) de la primera transacción observada. | `YYYY-MM-DD, h:mm am/pm`.                     |
+| **Última transferencia**        | Marca de tiempo (UTC) de la última transacción observada.  | Ayuda a ver actividad reciente.               |
+| **Dust In / Dust Out / Total**  | Número de micro/small tx (según umbrales).                 | Mucho “dust” puede ser spam o automatización. |
 
-### Exposure (exposición)
+### 7.3 Evidencia de Blacklist (USDT)
 
-Mide el **porcentaje relativo** de señales dentro de lo analizado:
+> Esta sección **aparece sólo** si la wallet está listada en el **contrato oficial** de USDT.
 
-* **Blacklist Indirect In**: parte de la actividad que proviene de direcciones que están en listas negras/flags.
-* **Blacklist Indirect Out**: parte de la actividad que va hacia esas direcciones.
-* **Dust In (USDT) / Dust Out (USDT)**: cuánta presencia tienen las micro-transacciones en entradas/salidas.
-  Útil para detectar spam/dusting u operaciones automatizadas.
-* **DEX / Exchange** (si se habilitan listas): interacción con contratos de exchanges o casas de cambio. Informativo.
+| Campo                | Qué es                                                                | Cómo leerlo                                               |
+| -------------------- | --------------------------------------------------------------------- | --------------------------------------------------------- |
+| **Tx hash**          | Transacción que ejecutó el `AddedBlackList(address)`.                 | **Clic** en `[Ver en TronScan]` abre el detalle on-chain. |
+| **Fecha/Hora (UTC)** | Momento exacto en que se aplicó el bloqueo.                           | Sirve para correlacionar con movimientos previos.         |
+| **Ejecutor**         | Contrato **MultiSigWallet** del emisor (Tether) que aprobó la acción. | Confirma que el freeze vino del admin del token.          |
+| **Nota**             | Descripción técnica breve.                                            | Por qué no podrás transferir USDT desde esa address.      |
 
-> **Importante**: “Exposure” no es dinero perdido ni congelado; es un **mapa de riesgo** de con quién/qué interactúa la wallet.
+#### 7.3.1 Tabla: Transacciones relevantes alrededor del bloqueo
 
-### Reasons (razones)
+Se listan **entradas/salidas USDT** en una **ventana temporal** configurable (`BL_TIME_WINDOW_MS`) y **montos ≥ `BL_MIN_USDT`**.
 
-Tabla con **códigos** y **pesos** que componen el score:
+| Columna               | Qué es                                                               | Cómo leerlo                                                                               |
+| --------------------- | -------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| **Fecha (UTC)**       | Momento de la transferencia.                                         | Línea de tiempo para ver contexto.                                                        |
+| **Dir**               | `IN` o `OUT`.                                                        | Si recibiste o enviaste USDT.                                                             |
+| **From**              | Dirección origen. **Clic** para abrir en TronScan.                   | Puedes validar quién te pagó.                                                             |
+| **To**                | Dirección destino. **Clic** para abrir en TronScan.                  | Puedes validar a quién pagaste.                                                           |
+| **USDT**              | Monto transferido. **Clic** para abrir la transacción (si hay hash). | Verifica el evento exacto en TronScan.                                                    |
+| **🔴 (marca visual)** | “Sospechosa / causa probable”.                                       | Se activa si: aparece en `RISK_SUSPECTS` o fue detectada como contraparte riesgosa 1-hop. |
 
-* `BLACKLIST_USDT`
-  La dirección aparece en listas negras de USDT. Sube el score a 100.
-* `BLACKLIST_USDT_EVIDENCE`
-  Evidencia adicional de blacklist establecoin (misma severidad).
-* `FRAUD_FLAG`
-  TronScan marcó señales de fraude/abuso. Suma +20.
-* `COUNTERPARTY_HIGH`
-  Se detectaron `n` contrapartes a 1 salto con alto riesgo. Suma +12 por cada una (hasta +36).
-* `DUST_ACTIVITY`
-  Se detectaron muchos movimientos muy pequeños (contados como “dust”). Suma +5 (mínimo) más +1 por evento extra (hasta +15).
+> **Idea clave:** la tabla ayuda a **evidenciar** qué transacciones (p. ej. desde una address con riesgo medio) **pudieron motivar** el blacklist.
 
-### Otros términos frecuentes
+### 7.4 Exposure (mapa de exposición)
 
-* **TRON / TRX / TRC-20**
+| Categoría                             | Qué mide                                                 | Ejemplo de lectura                             |
+| ------------------------------------- | -------------------------------------------------------- | ---------------------------------------------- |
+| **Blacklist Indirect In / Out**       | Porción relativa de actividad con contrapartes marcadas. | Si es alto, hay contacto frecuente con riesgo. |
+| **Dust In / Dust Out**                | Peso de micro-transacciones.                             | Mucho dust puede ser spam/dusting o bots.      |
+| **DEX / Exchange** *(si se habilita)* | Interacción con DEX/CEX etiquetados.                     | Útil para ver hábitos de la wallet.            |
 
-  * **TRON**: la red blockchain.
-  * **TRX**: moneda nativa de TRON (parecida a “ETH” en Ethereum).
-  * **TRC-20**: estándar de token en TRON (ej.: USDT en TRON es un TRC-20).
-* **USDT (Tether)**
-  Stablecoin cuyo valor suele mantenerse cerca de 1 USD. En TRON, el contrato oficial es único; los cálculos solo usan ese contrato para evitar confusiones.
-* **Address (dirección)**
-  Identificador de la wallet. En TRON comienza con **T…**.
-* **1-hop (un salto)**
-  Contrapartes que interactuaron **directamente** con la wallet (entradas o salidas).
-  *Ejemplo:* A ↔ **B** (tú) ↔ C → **A** y **C** son **1-hop** respecto de **B**.
-* **Blacklist (lista negra)**
-  Listado de direcciones bloqueadas o reportadas por incumplimientos, sanciones, fraudes, etc.
-* **Dust (polvo)**
-  Transacciones **muy pequeñas**. Por sí solas no implican delito, pero en conjunto pueden indicar *spamming* o intentos de rastreo.
+> **No es dinero congelado ni perdido**; es un **mapa** de con quién y cómo interactúa la wallet.
 
----
+### 7.5 Reasons (razones del score)
 
-## 7) Buenas prácticas y límites
-
-* El score es **heurístico**, no un dictamen legal. Úsalo como **señal** para priorizar revisiones.
-* **Privacidad**: el sistema consulta APIs públicas.
-* **Cobertura**: el análisis se centra en **USDT (TRC-20)** y señales más comunes. Puedes ampliar a otros tokens o categorías (DEX/CEXs etiquetados) añadiendo listas.
-* **Recencia de datos**: algunas APIs tienen paginación o límites. Si necesitas un histórico más amplio, implementa paginado/lotes.
+| Código                    | Significado                                        | Efecto en score                                  |
+| ------------------------- | -------------------------------------------------- | ------------------------------------------------ |
+| `BLACKLIST_USDT`          | Aparece en blacklist del contrato USDT.            | Fuerza **High** (≈100).                          |
+| `BLACKLIST_USDT_EVIDENCE` | Confirmación por endpoint de stablecoin blacklist. | Misma severidad si aplica.                       |
+| `FRAUD_FLAG`              | TronScan detecta patrones de fraude/abuso.         | **+20**                                          |
+| `COUNTERPARTY_HIGH`       | `n` contrapartes 1-hop con riesgo.                 | **+12** c/u (tope **+36**).                      |
+| `DUST_ACTIVITY`           | Actividad micro/small elevada.                     | **+5** base + **1**/evento extra (tope **+15**). |
 
 ---
 
-## 8) Personalización rápida
-
-* **Ajustar sensibilidad DUST**: edita `.env`
-
-  ```
-  DUST_MICRO_USDT=0.1
-  DUST_SMALL_USDT=1.0
-  DUST_MIN_EVENTS=3
-  ```
-
-  Más bajo → más sensible (más eventos contarán como dust).
-* **Recalibrar pesos**: `backend/app/risk_engine/weights.py`
-
-  * `COUNTERPARTY_HIT`, `COUNTERPARTY_CAP`
-  * `DUST_BASE`, `DUST_PER_EVENT`, `DUST_CAP`
-* **Agregar tokens**: replica la lógica de USDT para otros contratos (filtrando por “address” del contrato correspondiente).
+## 8) Glosario
+| Término                     | Explicación llana                                                                                    |
+| --------------------------- | ---------------------------------------------------------------------------------------------------- |
+| **TRON**                    | La red blockchain.                                                                                   |
+| **TRX**                     | Moneda nativa de TRON (como “ETH” en Ethereum).                                                      |
+| **TRC-20**                  | Estándar de token en TRON (USDT en TRON es TRC-20).                                                  |
+| **USDT (Tether)**           | Stablecoin ≈ 1 USD. Tiene funciones de **blacklist** a nivel de contrato.                            |
+| **Address**                 | Identificador de una wallet (empieza por **T**).                                                     |
+| **1-hop**                   | Contrapartes que interactúan **directamente** con tu wallet.                                         |
+| **Smart Contract Account**  | Cuenta controlada por **código**, no por clave privada (ej.: multisig).                              |
+| **MultiSigWallet**          | Contrato que requiere múltiples firmas para ejecutar una acción (ej.: listar en blacklist).          |
+| **AddedBlackList(address)** | Evento del contrato USDT que bloquea a esa dirección para enviar USDT.                               |
+| **Dust**                    | Transacciones muy pequeñas; por sí solas no son delito, pero en conjunto pueden indicar spam o bots. |
+| **TronScan**                | Explorador para ver transacciones, balances, eventos y listas negras.                                |
 
 ---
 
-## 9) Solución de problemas
+## 9) Buenas prácticas y límites
 
-* **401 Unauthorized (TronScan)**
-  Asegúrate de que `TRONSCAN_API_KEY` esté en `.env` y que el backend **cargue** ese `.env`. El proyecto ya usa `python-dotenv`.
-* **No carga el .env**
-  Ejecuta desde la carpeta `backend/` y verifica que `.env` esté allí. Reinicia `run.bat`.
-* **No aparece el PDF**
-  Abre el endpoint `GET /report/{address}` desde el navegador o desde la app (asegúrate de que la IP del backend sea accesible desde el teléfono).
-* **Notación científica o muchos decimales**
-  Ya se formatean cantidades a 2 decimales con separador de miles, y se filtran outliers. Si ves algo raro, revisa la fuente (transacciones de otro token o datos corruptos).
+* El score es **heurístico**; no es un dictamen legal.
+* Privacidad: se consultan **APIs públicas** (TronGrid/TronScan).
+* Foco en **USDT TRC-20**; ampliar a otros tokens es sencillo replicando la lógica.
+* Recencia: usa paginación si necesitas histórico más amplio que 200 TRC-20.
 
 ---
 
-## 10) Roadmap sugerido
+## 10) Personalización rápida
 
-* Paginado para cubrir más de 200 transferencias TRC-20.
-* Etiquetado de **DEX/Exchanges** y categorías adicionales (juegos, mixers, gambling).
-* Conversión a **USD histórico** por fecha (si quieres ver valores en fiat).
-* “Motivos ampliados” por transacción (trail de evidencias) en el PDF largo.
+* **Sensibilidad DUST** (`.env`):
+
+```ini
+DUST_MICRO_USDT=0.1
+DUST_SMALL_USDT=1.0
+DUST_MIN_EVENTS=3
+```
+
+* **Ventana de evidencia** (tabla alrededor de blacklist):
+
+```ini
+BL_TIME_WINDOW_MS=259200000   # 3 días
+BL_MIN_USDT=10000             # umbral de monto
+```
+
+* **Sospechosos explícitos**:
+
+```ini
+RISK_SUSPECTS=TQQeZmH1ZU2AFv3c93rZaKUZ2bftTGxDK9,OTRA_ADDRESS
+```
+
+* **Pesos**: `backend/app/risk_engine/weights.py`
+  `COUNTERPARTY_HIT`, `COUNTERPARTY_CAP`, `DUST_BASE`, `DUST_PER_EVENT`, `DUST_CAP`, etc.
 
 ---
 
-## 11) Descargo de responsabilidad
+## 11) Solución de problemas
 
-Este software proporciona **indicadores de riesgo** con fines informativos. No constituye asesoría financiera ni de cumplimiento. Verifica siempre con tus propios criterios/controles adicionales.
+* **401 Unauthorized (TronScan)** → agrega `TRONSCAN_API_KEY` al `.env` y reinicia.
+* **.env no carga** → ejecuta desde `backend/` (ya usamos `python-dotenv`).
+* **PDF no descarga** → prueba `GET /report/{address}` en navegador; verifica IP/puerto accesibles.
+* **Cantidades raras o en notación científica** → ya formateamos 2 decimales + miles y filtramos outliers; valida que sean **USDT TRC-20** del contrato oficial.
 
 ---
 
-## 12) Ejemplo de interpretación rápida
+## 12) Roadmap sugerido
+
+* Paginado para cubrir >200 transferencias TRC-20.
+* Etiquetado DEX/CEX adicional y nuevas categorías (mixers, gambling, juegos).
+* Conversión a USD histórico por fecha.
+* PDF extendido con **trail de evidencias por transacción**.
+
+---
+
+## 13) Descargo de responsabilidad
+
+Este software proporciona **indicadores de riesgo** con fines informativos.
+No constituye asesoría financiera/compliance. Usa controles adicionales propios.
+
+---
+
+## 14) Ejemplo de interpretación rápida
 
 > **Risk Score 62 (Medium)**
 >
 > * Razones: `DUST_ACTIVITY` (+12), `COUNTERPARTY_HIGH` (+24), `FRAUD_FLAG` (+20)
 > * Exposure: **Dust In 40%**, **Blacklist Indirect Out 35%**, **Dust Out 25%**
-> * Acción: vigilar nuevas transacciones; evitar interacción hasta clarificar contrapartes; considerar monitoreo más frecuente.
+> * Acción: vigilar nuevas transacciones; evitar interacción hasta clarificar contrapartes; considerar monitoreo continuo.

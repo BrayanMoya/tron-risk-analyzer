@@ -3,7 +3,7 @@ from typing import List, Dict, Any, Tuple, Set
 from decimal import Decimal, InvalidOperation
 import os
 
-from ..sources.tronscan import check_account_security, check_stablecoin_blacklist, trc20_transfers
+from ..sources.tronscan import check_account_security, check_stablecoin_blacklist, trc20_transfers, transaction_info
 from ..sources.trongrid import account_overview, account_trc20_transfers, USDT_CONTRACT
 from .weights import W
 
@@ -14,6 +14,9 @@ DUST_MIN_EVENTS = int(os.getenv("DUST_MIN_EVENTS", "3"))
 USDT_CONTRACT_UP = USDT_CONTRACT.upper()
 USDT_MAX_EVENT = Decimal("1e12")  # umbral sanitario por evento
 
+BL_TIME_WINDOW_MS = int(os.getenv("BL_TIME_WINDOW_MS", str(3*24*60*60*1000)))  # ±3 días
+BL_MIN_USDT = Decimal(os.getenv("BL_MIN_USDT", "10000"))                       # umbral de relevancia
+SUSPECT_LIST = {a.strip() for a in os.getenv("RISK_SUSPECTS", "").split(",") if a.strip()}
 
 def fmt_amount(d: Decimal, places=2) -> str:
     # 2 decimales + separador de miles, sin notación científica
@@ -239,6 +242,71 @@ async def score_wallet(address_b58: str) -> dict:
         "dust_total": dust_events,
     })
 
+    # -------- Evidencia ampliada de Blacklist USDT --------
+    bl_report = None
+    if bl.get("total", 0) > 0:
+        bl_rec = (bl.get("data") or [None])[0] or {}
+        bl_hash = bl_rec.get("transHash")
+        bl_time_s = bl_rec.get("time")
+        bl_time_ms = bl_time_s * 1000 if isinstance(bl_time_s, int) else None
+
+        txi = {}
+        executor = None
+        if bl_hash:
+            try:
+                txi = await transaction_info(bl_hash)
+                executor = txi.get("toAddress")  # suele ser el multisig "MultiSigWallet"
+            except Exception:
+                txi = {}
+
+        # Ventana temporal alrededor del evento para seleccionar transacciones relevantes
+        related = []
+        if isinstance(items, list) and bl_time_ms:
+            tmin = bl_time_ms - BL_TIME_WINDOW_MS
+            tmax = bl_time_ms + BL_TIME_WINDOW_MS
+            for it in items:
+                if not _is_usdt_trc20(it):
+                    continue
+                ts = it.get("block_timestamp") or it.get("timestamp")
+                if ts is None or not (tmin <= ts <= tmax):
+                    continue
+                amt = _normalize_amount_usdt(it)
+                if amt < BL_MIN_USDT:
+                    continue
+                frm = (it.get("from") or it.get("transfer_from") or "").strip()
+                to = (it.get("to") or it.get("transfer_to") or "").strip()
+                direction = "IN" if to == address_b58 else ("OUT" if frm == address_b58 else "UNK")
+                counter = frm if direction == "IN" else to
+                txh = it.get("transaction_id") or it.get("hash") or ""
+                # sospec: en lista explícita o marcado por nuestros checks 1-hop
+                is_risky_cp = (counter in SUSPECT_LIST) or (counter in risky_in) or (counter in risky_out)
+                # marca especial
+                cause_probable = (counter == "TQQeZmH1ZU2AFv3c93rZaKUZ2bftTGxDK9")
+                related.append({
+                    "timestamp": ts,
+                    "direction": direction,
+                    "from": frm,
+                    "to": to,
+                    "amount_usdt": str(amt),
+                    "tx": txh,
+                    "suspect": bool(is_risky_cp or cause_probable),
+                    "cause_probable": bool(cause_probable),
+                })
+
+            # ordena por monto desc
+            related.sort(key=lambda r: Decimal(r["amount_usdt"]), reverse=True)
+            # si quieres limitar filas, hazlo aquí (p. ej. top 20):
+            related = related[:20]
+
+        bl_report = {
+            "is_blacklisted_usdt": True,
+            "tx_hash": bl_hash,
+            "timestamp_ms": bl_time_ms,
+            "executor_contract": executor,  # típicamente TBPxhVAsu... (MultiSigWallet)
+            "note": "Evento AddedBlackList ejecutado por multisig del emisor (USDT).",
+            "related_transfers": related,
+        }
+
     result = {
         "address": address_b58,
         "risk_score": score,
@@ -251,6 +319,7 @@ async def score_wallet(address_b58: str) -> dict:
             "tronscan_blacklist": bl,
         },
         "exposure": _exposure_breakdown(len(risky_in), len(risky_out), dust_in, dust_out),
+        "blacklist_report": bl_report,
     }
 
     return result
