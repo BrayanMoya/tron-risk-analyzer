@@ -76,6 +76,7 @@ run.bat
 | ------------------- | --------------------------------------------------------------------------------- | ------------------------------------ |
 | `HOST`              | Host del servidor FastAPI.                                                        | `0.0.0.0`                            |
 | `PORT`              | Puerto del servidor.                                                              | `8000`                               |
+| `TRONGRID_API_KEY`  | API key de TronGrid (recomendable para evitar rate limits).                       | *(vacío)*                            |
 | `TRONSCAN_API_KEY`  | API key de TronScan (opcional, pero recomendable).                                | *(vacío)*                            |
 | `USDT_CONTRACT`     | Contrato oficial de USDT TRC-20 que se analiza.                                   | `TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t` |
 | `USDT_MAX_EVENT`    | Máximo valor permitido por evento (sanidad de datos).                             | `1e12`                               |
